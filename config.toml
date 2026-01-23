@@ -10,7 +10,8 @@ build_search_index = false
 [markdown]
 
 [markdown.highlighting]
-theme = "catppuccin-mocha"
+#theme = "catppuccin-mocha"
+theme = "duckquill"
 
 [extra]
 # Put all your custom variables here
