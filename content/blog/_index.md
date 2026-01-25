@@ -1,6 +1,10 @@
 +++
-title = "List of blog posts"
+title = "Dusan Haustein's Blog"
 sort_by = "date"
-template = "blog.html"
-page_template = "blog-page.html"
+template = "article_list.html"
+page_template = "article.html"
+paginate_by = 2
 +++
+
+Welcome to my blog!
+
