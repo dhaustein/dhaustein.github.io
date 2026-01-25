@@ -33,3 +33,6 @@ github_alerts = false
 index_format = "fuse_json"
 
 [extra]
+accent_color = "#ff7800"
+accent_color_dark = "#ffa348"
+
