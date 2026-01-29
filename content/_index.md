@@ -13,3 +13,5 @@ I work in QA and I spent the last ten years turning chaos into (mostly) orderly 
 In my free time, or what is left of it, I enjoy sci-fi, dying in videogames, or tinkering with my Linux homelab. When I’m not debugging Kubernetes or my life choices, I take my mountain bike for a spin and chase after my toddler daughter, who is the real QA engineer in the family (she finds the best edge cases).
 
 If you’re here for testing tips, war stories, or just to laugh at my hate for YAML, you’re in the right place. Stick around, and if anything resonates, or if you just want to commiserate about flaky tests, hit me up on LinkedIn. I don’t bite, unless you skip writing unit tests.
+
+_Avatar picture created with the awesome [Stardew Valley Character Creator](https://jazzybee.itch.io/) by Jazzybee._
