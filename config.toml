@@ -32,10 +32,6 @@ index_format = "fuse_json"
 accent_color = "#ff7800"
 accent_color_dark = "#ffa348"
 
-styles = [
-    "portrait.css"
-]
-
 [extra.nav]
 show_theme_switcher = true
 links = [
