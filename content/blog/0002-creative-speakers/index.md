@@ -23,15 +23,15 @@ Creative in their effort to satisfy the regulation, added a Standby mode™ to t
 
 Again, this is very nice, the speakers will consume little to no energy when you don't play any sound. The problem, however, is that they take a second or two to wake up when they do have to play sound.
 
-Imagine the following: You turn on your speakers, browse the web some, then you want to watch a Youtube video. The video starts, and you hear nothing. And then suddendly, the sounds comes back. But this is not a bug, this is a feature. The speakers simply went into Standby mode™ while you were doomcrolling. But them waking up from their slumber took a few moments of the video you wanted to watch, so now you have to restart it.
+Imagine the following: You turn on your speakers, browse the web some, then you want to watch a Youtube video. The video starts, and you hear nothing. And then suddenly, the sounds come back. But this is not a bug, this is a feature. The speakers simply went into Standby mode™ while you were doomscrolling on Facebook. But them waking up from their slumber took a few moments of the video you wanted to watch, so now you have to restart it.
 
-I admit this is a minor inconvenience, but annoying still. I had it ony my plate almost every day!
+I admit this is a minor inconvenience, but annoying still. I had it on my plate almost every day!
 
 ### The Solution
 
-I wrote a short PowerShell script that constantly plays a sound of very high frequency. This is inperceptible to humans and it provides a constant signal to the speaker so that they wont go into Standby mode™.
+I wrote a short PowerShell script that constantly plays a sound of very high frequency. This is imperceptible to humans and it provides a constant signal to the speaker so that they won't go into Standby mode™.
 
-Yes I know, this totally goes against any notion of trying to save energy. But the efect on the overall electricity consumption is tiny. The speakers are not turned on for most of the day anyway. The positive effect on the harmony of this household, however, has been off the charts.
+Yes I know, this totally goes against any notion of trying to save energy. But the effect on the overall electricity consumption is tiny. The speakers are not turned on for most of the day anyway. The positive effect on the harmony of this household, however, has been off the charts.
 
 Here is the code:
 
@@ -58,7 +58,7 @@ Add the script to the Task scheduler and set it to trigger after login. The comm
 powershell -ExecutionPolicy Bypass -File C:\example\path\script.ps1
 ```
 
-For the `tone.wav` audio file, you have options. You can donwload something from the Internet or you can generate the tone yourself. I used Audacity but anything similar will do. The important part is that you create a very high frequency sound with the amplitude as low as you can set it. That is, make the volume as low as possible. 
+For the `tone.wav` audio file, you have options. You can download something from the Internet or you can generate the tone yourself. I used Audacity but anything similar will do. The important part is that you create a very high frequency sound with the amplitude as low as you can set it. That is, make the volume as low as possible.
 
 The sound will be imperceptible, but there is no point in blasting it at max. Presumably the speakers will not actually vibrate/do anything at these high frequencies, but I haven't done any actual measurements.
 
@@ -66,4 +66,4 @@ If it's any useful, here's what the tone I used looks like for reference:
 
 {{ image(url="freq_analysis.png", no_hover=true, transparent=true) }}
 
-And that's it! If you are more adventuours, [there are hardware modifications](https://imgur.com/gallery/creative-gigaworks-t20-rev-2-auto-off-removal-pwqiQHX) that do the same thing, but those are obviously more invasive.
+And that's it! If you are more adventurous, [there are hardware modifications](https://imgur.com/gallery/creative-gigaworks-t20-rev-2-auto-off-removal-pwqiQHX) that do the same thing, but those are obviously more invasive.
