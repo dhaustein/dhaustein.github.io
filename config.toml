@@ -38,7 +38,7 @@ links = [
 	{ url = "@/blog/_index.md", name = "Blog" },
 	{ url = "https://github.com/dhaustein/cv/releases/download/dusan-haustein-cv-eng-latest/dusan-haustein-cv-eng.pdf", name = "CV" },
 	{ url = "https://www.linkedin.com/in/dusanhaustein/", name = "LinkedIn" },
-	{ url = "@/extra/model.html", name = "Extra"  }
+	{ url = "/extra/model.html", name = "Extra"  }
 ]
 show_feed = true
 
