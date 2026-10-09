@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Two-storey house model - Litice</title>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+      background: #eef2f5;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #controls {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: 260px;
+      padding: 16px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 4px 20px #0002;
+      color: #263238;
+    }
+
+    h1 {
+      font-size: 17px;
+      margin: 0 0 12px;
+    }
+
+    label {
+      display: block;
+      margin: 12px 0 4px;
+      font-size: 13px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+    }
+
+    button {
+      margin-top: 12px;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+
+    .note {
+      margin-top: 12px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #58656d;
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+
+<body>
+  <div id="controls">
+    <h1>Corrected house model</h1>
+
+    <label for="wallOpacity">
+      Exterior wall opacity:
+      <span id="wallValue">50%</span>
+    </label>
+    <input id="wallOpacity"
+           type="range" min="0.1" max="1" step="0.05" value="0.5">
+
+    <label for="floorOpacity">
+      First-floor slab opacity:
+      <span id="floorValue">65%</span>
+    </label>
+    <input id="floorOpacity"
+           type="range" min="0.1" max="1" step="0.05" value="0.65">
+
+    <label for="explode">Exploded view separation</label>
+    <input id="explode"
+           type="range" min="0" max="3" step="0.05" value="0">
+
+    <label>
+      <input id="showFirstFloor" type="checkbox" checked>
+      Show first floor
+    </label>
+
+    <button id="resetView">Reset isometric view</button>
+
+    <div class="note">
+      Drag to orbit · Scroll to zoom · Right-drag to pan.<br>
+      Front / terrace = bottom of the supplied plans.<br>
+      Dimensions are illustrative, not construction measurements.
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from
+      "three/addons/controls/OrbitControls.js";
+
+    // ------------------------------------------------------------
+    // Coordinate convention
+    // ------------------------------------------------------------
+    // Plan coordinates:
+    //   x increases from LEFT to RIGHT.
+    //   d increases from FRONT to REAR.
+    //
+    // World coordinates:
+    //   X = x
+    //   Y = height
+    //   Z = -d
+    //
+    // Therefore the bottom-left plan viewpoint is:
+    //   negative world X, positive world Z, elevated world Y.
+    //
+    // All dimensions below are approximate metres.
+    // ------------------------------------------------------------
+
+    const W = 6.0;
+    const D = 10.2;
+    const STOREY = 3.0;
+    const WALL_H = 2.75;
+    const EXT_T = 0.20;
+    const INT_T = 0.12;
+    const SLAB_T = 0.18;
+    const DOOR_H = 2.12;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color("#eef2f5");
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setClearColor("#eef2f5");
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.OrthographicCamera();
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x88929a, 2.3));
+
+    const sunlight = new THREE.DirectionalLight(0xffffff, 2.2);
+    sunlight.position.set(-8, 16, 10);
+    scene.add(sunlight);
+
+    const ground = new THREE.Group();
+    const upper = new THREE.Group();
+    const stairs = new THREE.Group();
+    const terrace = new THREE.Group();
+
+    upper.position.y = STOREY;
+
+    scene.add(ground, upper, stairs, terrace);
+
+    function material(color, opacity = 1) {
+      return new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.78,
+        metalness: 0,
+        transparent: opacity < 1,
+        opacity,
+        depthWrite: opacity >= 1,
+        side: THREE.DoubleSide
+      });
+    }
+
+    const exteriorMat = material("#bac7c9", 0.5);
+    const partitionMat = material("#e3e0d7");
+    const groundFloorMat = material("#e8d8bc");
+    const upperFloorMat = material("#f0e5d0", 0.65);
+    const timberMat = material("#b58a60");
+    const treadMat = material("#c7a17c");
+    const whiteMat = material("#f9f8f3");
+    const frameMat = material("#627079");
+    const glassMat = material("#a7d5e4", 0.22);
+    const blueMat = material("#6689af");
+    const upholsteryMat = material("#c0c8cc");
+    const darkMat = material("#45525b");
+    const countertopMat = material("#f4f1e9");
+    const fixtureMat = material("#ffffff");
+    const waterMat = material("#b9d7df", 0.6);
+
+    // A box using plan coordinates.
+    function box(
+      group, x, d, bottom,
+      width, depth, height, mat,
+      outlined = false
+    ) {
+      const geometry = new THREE.BoxGeometry(width, height, depth);
+      const mesh = new THREE.Mesh(geometry, mat);
+
+      mesh.position.set(
+        x + width / 2,
+        bottom + height / 2,
+        -(d + depth / 2)
+      );
+
+      group.add(mesh);
+
+      if (outlined) {
+        const lines = new THREE.LineSegments(
+          new THREE.EdgesGeometry(geometry),
+          new THREE.LineBasicMaterial({
+            color: "#657078",
+            transparent: true,
+            opacity: 0.32
+          })
+        );
+        mesh.add(lines);
+      }
+
+      return mesh;
+    }
+
+    // ------------------------------------------------------------
+    // Walls with real openings
+    // ------------------------------------------------------------
+    // axis "x": wall runs left-right at fixed plan depth.
+    // axis "d": wall runs front-rear at fixed plan x.
+    //
+    // Opening:
+    // { start, end, bottom, top, kind, hingeAtEnd, swing }
+    //
+    // start/end are absolute plan coordinates along the wall.
+    // ------------------------------------------------------------
+
+    function wall(
+      group, axis, fixed, start, end,
+      openings = [], external = false
+    ) {
+      const thickness = external ? EXT_T : INT_T;
+      const mat = external ? exteriorMat : partitionMat;
+
+      function piece(a, b, bottom, top) {
+        if (b - a < 0.001 || top - bottom < 0.001) return;
+
+        if (axis === "x") {
+          box(
+            group, a, fixed - thickness / 2, bottom,
+            b - a, thickness, top - bottom, mat, true
+          );
+        } else {
+          box(
+            group, fixed - thickness / 2, a, bottom,
+            thickness, b - a, top - bottom, mat, true
+          );
+        }
+      }
+
+      const sorted = [...openings].sort((a, b) => a.start - b.start);
+      let cursor = start;
+
+      for (const o of sorted) {
+        piece(cursor, o.start, 0, WALL_H);
+        piece(o.start, o.end, 0, o.bottom);
+        piece(o.start, o.end, o.top, WALL_H);
+
+        if (o.kind === "window") {
+          addWindow(group, axis, fixed, o);
+        } else if (o.kind === "sliding") {
+          addSlidingWindow(group, axis, fixed, o);
+        } else if (o.kind === "door") {
+          addDoor(group, axis, fixed, o);
+        }
+
+        cursor = o.end;
+      }
+
+      piece(cursor, end, 0, WALL_H);
+    }
+
+    function door(start, end, extra = {}) {
+      return {
+        start, end,
+        bottom: 0,
+        top: DOOR_H,
+        kind: "door",
+        ...extra
+      };
+    }
+
+    function windowOpening(start, end, bottom = 0.9, top = 2.2) {
+      return { start, end, bottom, top, kind: "window" };
+    }
+
+    function openingBox(
+      group, axis, fixed, start, bottom,
+      length, height, thickness, mat
+    ) {
+      if (axis === "x") {
+        return box(
+          group, start, fixed - thickness / 2, bottom,
+          length, thickness, height, mat
+        );
+      }
+
+      return box(
+        group, fixed - thickness / 2, start, bottom,
+        thickness, length, height, mat
+      );
+    }
+
+    function addWindow(group, axis, fixed, o) {
+      const f = 0.055;
+      const width = o.end - o.start;
+      const height = o.top - o.bottom;
+
+      // Glazing.
+      openingBox(
+        group, axis, fixed,
+        o.start + f, o.bottom + f,
+        width - 2 * f, height - 2 * f, 0.018, glassMat
+      );
+
+      // Side jambs.
+      openingBox(
+        group, axis, fixed, o.start, o.bottom,
+        f, height, 0.09, frameMat
+      );
+      openingBox(
+        group, axis, fixed, o.end - f, o.bottom,
+        f, height, 0.09, frameMat
+      );
+
+      // Top and bottom frames.
+      openingBox(
+        group, axis, fixed, o.start, o.bottom,
+        width, f, 0.09, frameMat
+      );
+      openingBox(
+        group, axis, fixed, o.start, o.top - f,
+        width, f, 0.09, frameMat
+      );
+
+      // Centre mullion.
+      openingBox(
+        group, axis, fixed, o.start + width / 2 - f / 2,
+        o.bottom, f, height, 0.07, frameMat
+      );
+    }
+
+    function addSlidingWindow(group, axis, fixed, o) {
+      const frame = 0.055;
+      const width = o.end - o.start;
+      const height = o.top - o.bottom;
+      const panelWidth = (width - 2 * frame) / 2;
+      const slideDistance = 0.45;
+
+      function part(start, bottom, length, partHeight, thickness, mat, offset = 0) {
+        return openingBox(
+          group,
+          axis,
+          fixed + offset,
+          start,
+          bottom,
+          length,
+          partHeight,
+          thickness,
+          mat
+        );
+      }
+
+      // Outer jambs.
+      part(o.start, o.bottom, frame, height, 0.12, frameMat);
+      part(o.end - frame, o.bottom, frame, height, 0.12, frameMat);
+
+      // Head and low threshold.
+      part(o.start, o.top - frame, width, frame, 0.14, frameMat);
+      part(o.start, o.bottom, width, 0.025, 0.16, frameMat);
+
+      // Two parallel sliding tracks.
+      for (const offset of [-0.035, 0.035]) {
+        part(
+          o.start + frame,
+          o.bottom + 0.025,
+          width - 2 * frame,
+          0.015,
+          0.018,
+          frameMat,
+          offset
+        );
+      }
+
+      function glazedPanel(start, offset, handle = false) {
+        const bottom = o.bottom + 0.04;
+        const top = o.top - frame;
+        const panelHeight = top - bottom;
+
+        part(
+          start + frame,
+          bottom + frame,
+          panelWidth - 2 * frame,
+          panelHeight - 2 * frame,
+          0.018,
+          glassMat,
+          offset
+        );
+
+        // Panel perimeter.
+        part(start, bottom, frame, panelHeight, 0.055, frameMat, offset);
+        part(
+          start + panelWidth - frame,
+          bottom,
+          frame,
+          panelHeight,
+          0.055,
+          frameMat,
+          offset
+        );
+        part(start, bottom, panelWidth, frame, 0.055, frameMat, offset);
+        part(
+          start,
+          top - frame,
+          panelWidth,
+          frame,
+          0.055,
+          frameMat,
+          offset
+        );
+
+        if (handle) {
+          part(
+            start + panelWidth - 0.12,
+            o.bottom + 0.95,
+            0.025,
+            0.26,
+            0.075,
+            darkMat,
+            offset
+          );
+        }
+      }
+
+      // Right-hand fixed panel.
+      glazedPanel(o.start + frame + panelWidth, 0.035);
+
+      // Left-hand sliding panel shifted right along its own track.
+      glazedPanel(o.start + frame + slideDistance, -0.035, true);
+    }
+
+    function addDoor(group, axis, fixed, o) {
+      const width = o.end - o.start;
+      const frame = 0.045;
+
+      openingBox(
+        group, axis, fixed, o.start, 0,
+        frame, o.top, 0.09, frameMat
+      );
+      openingBox(
+        group, axis, fixed, o.end - frame, 0,
+        frame, o.top, 0.09, frameMat
+      );
+      openingBox(
+        group, axis, fixed, o.start, o.top - frame,
+        width, frame, 0.09, frameMat
+      );
+
+      const pivot = new THREE.Group();
+      const hingeAtEnd = o.hingeAtEnd ?? false;
+      const hinge = hingeAtEnd ? o.end : o.start;
+      const direction = hingeAtEnd ? -1 : 1;
+
+      if (axis === "x") {
+        pivot.position.set(hinge, 0, -fixed);
+      } else {
+        pivot.position.set(fixed, 0, -hinge);
+        pivot.rotation.y = Math.PI / 2;
+      }
+
+      const leafWidth = width - 2 * frame;
+      const leaf = new THREE.Mesh(
+        new THREE.BoxGeometry(leafWidth, o.top - frame, 0.045),
+        whiteMat
+      );
+
+      leaf.position.set(
+        direction * (frame + leafWidth / 2),
+        (o.top - frame) / 2,
+        0
+      );
+
+      pivot.add(leaf);
+      pivot.rotation.y += o.swing ?? Math.PI / 3;
+      group.add(pivot);
+    }
+
+    // ------------------------------------------------------------
+    // Floor slabs
+    // ------------------------------------------------------------
+
+    box(
+      ground, 0, 0, -SLAB_T,
+      W, D, SLAB_T, groundFloorMat, true
+    );
+
+    // Stair opening coordinates. Same on both plans.
+    const STAIR = {
+      left: 3.80,
+      right: 5.88,
+      front: 4.40,
+      rear: 6.50
+    };
+
+    // Four slab rectangles surround the stairwell.
+    // No slab is created within the opening.
+    function addUpperSlab() {
+      const s = STAIR;
+
+      box(
+        upper, 0, 0, -SLAB_T,
+        W, s.front, SLAB_T, upperFloorMat, true
+      );
+
+      box(
+        upper, 0, s.rear, -SLAB_T,
+        W, D - s.rear, SLAB_T, upperFloorMat, true
+      );
+
+      box(
+        upper, 0, s.front, -SLAB_T,
+        s.left, s.rear - s.front, SLAB_T,
+        upperFloorMat, true
+      );
+
+      box(
+        upper, s.right, s.front, -SLAB_T,
+        W - s.right, s.rear - s.front, SLAB_T,
+        upperFloorMat, true
+      );
+    }
+
+    addUpperSlab();
+
+    // ------------------------------------------------------------
+    // Ground-floor exterior
+    // ------------------------------------------------------------
+
+    // Front / terrace elevation.
+    // wall(ground, "x", 0, 0, W, [
+    //   door(1.55, 2.55, { swing: -Math.PI / 3 })
+    // ], true);
+
+    // Wide, nearly floor-to-ceiling sliding terrace glazing.
+    // The opening width is approximate because the plan is undimensioned.
+    wall(ground, "x", 0, 0, W, [
+      {
+        start: 0.40,
+        end: 4.85,
+        bottom: 0,
+        top: 2.35,
+        kind: "sliding"
+      }
+    ], true);
+
+    // Rear elevation.
+    wall(ground, "x", D, 0, W, [
+      windowOpening(1.25, 2.10, 1.1, 2.25),
+      windowOpening(4.20, 5.10)
+    ], true);
+
+    // Left elevation: large living window and entrance door.
+    wall(ground, "d", 0, 0, D, [
+      windowOpening(1.0, 3.55, 0.55, 2.3),
+      door(6.70, 7.65, { swing: -Math.PI / 3 })
+    ], true);
+
+    wall(ground, "d", W, 0, D, [], true);
+
+    // ------------------------------------------------------------
+    // Ground-floor interior partitions
+    // ------------------------------------------------------------
+
+    // Hall 1.01 / open-plan living room 1.05.
+    wall(ground, "x", 6.50, 0.10, 3.80, [
+      door(2.75, 3.65, { swing: Math.PI / 3 })
+    ]);
+
+    // Hall 1.01 / rear bathroom 1.02.
+    wall(ground, "x", 8.35, 0.10, 3.80, [
+      door(2.75, 3.60, { swing: -Math.PI / 3 })
+    ]);
+
+    // Rear room 1.03 / hall and bathroom.
+    wall(ground, "d", 3.80, 6.50, D - 0.10, [
+      door(7.0, 7.85, { swing: Math.PI / 3 })
+    ]);
+
+    // Rear room 1.03 / stairs.
+    wall(ground, "x", 6.50, 3.80, W - 0.10);
+
+    // Low stair-side separator at the edge nearest living room.
+    // Do not enclose the entire stairwell.
+    box(
+      ground, STAIR.left, STAIR.front - 0.06, 0,
+      STAIR.right - STAIR.left, 0.12, 0.9,
+      partitionMat, true
+    );
+
+    // ------------------------------------------------------------
+    // First-floor exterior
+    // ------------------------------------------------------------
+
+    wall(upper, "x", 0, 0, W, [
+      windowOpening(1.15, 2.50, 0.75, 2.25),
+      windowOpening(3.35, 4.75, 0.75, 2.25)
+    ], true);
+
+    wall(upper, "x", D, 0, W, [
+      windowOpening(0.60, 1.30, 1.05, 2.25),
+      windowOpening(3.45, 5.05, 0.75, 2.25)
+    ], true);
+
+    wall(upper, "d", 0, 0, D, [
+      windowOpening(6.80, 7.75, 1.0, 2.25)
+    ], true);
+
+    wall(upper, "d", W, 0, D, [], true);
+
+    // ------------------------------------------------------------
+    // First-floor interior partitions
+    // ------------------------------------------------------------
+
+    // Separate front bedrooms 2.06 and 2.05.
+    wall(upper, "d", 3.0, 0.10, 4.40);
+
+    // Both bedroom doors open onto landing 2.01.
+    wall(upper, "x", 4.40, 0.10, STAIR.left, [
+      door(1.90, 2.80, { swing: -Math.PI / 3 }),
+      door(3.12, 3.72, { swing: Math.PI / 3 })
+    ]);
+
+    // Wall below the stair void / bedroom 2.05.
+    wall(upper, "x", 4.40, STAIR.left, W - 0.10);
+
+    // Bathroom 2.02 / landing 2.01.
+    wall(upper, "d", 2.00, 4.40, 7.85, [
+      door(5.20, 6.05, { swing: -Math.PI / 3 })
+    ]);
+
+    // Bathroom 2.02 / bedroom 2.06.
+    wall(upper, "x", 4.40, 0.10, 1.90);
+
+    // Small rear room 2.03 / bathroom 2.02.
+    wall(upper, "x", 7.85, 0.10, 2.00, [
+      door(0.30, 1.10, { swing: Math.PI / 3 })
+    ]);
+
+    // Rear-left rooms / rear-right bedroom 2.04.
+    wall(upper, "d", 2.00, 7.85, D - 0.10);
+
+    // Rear bedroom 2.04 / landing and stairwell.
+    wall(upper, "x", 6.50, 2.00, W - 0.10, [
+      door(2.60, 3.50, { swing: -Math.PI / 3 })
+    ]);
+
+    // ------------------------------------------------------------
+    // U-shaped stairs: LEFT -> RIGHT -> LEFT
+    // ------------------------------------------------------------
+    // Lower flight:
+    //   begins at left/front, ascending toward right.
+    //
+    // Half-landing:
+    //   at right exterior wall.
+    //
+    // Upper flight:
+    //   returns toward left/rear, reaching landing 2.01.
+    //
+    // The U opens LEFT, not toward the front or rear.
+    // ------------------------------------------------------------
+
+    const STEPS_PER_FLIGHT = 8;
+    const rise = STOREY / (2 * STEPS_PER_FLIGHT);
+    const flightLength = 1.27;
+    const run = flightLength / STEPS_PER_FLIGHT;
+    const flightWidth = 0.90;
+
+    const lowerD = STAIR.front + 0.06;
+    const upperD = STAIR.rear - 0.06 - flightWidth;
+    const landingX = STAIR.left + flightLength;
+    const landingWidth = STAIR.right - landingX;
+    const midHeight = STOREY / 2;
+
+    // Closed-rise step blocks avoid a floating spiral appearance.
+    for (let i = 0; i < STEPS_PER_FLIGHT; i++) {
+      const height = (i + 1) * rise;
+
+      box(
+        stairs,
+        STAIR.left + i * run,
+        lowerD,
+        0,
+        run,
+        flightWidth,
+        height,
+        treadMat,
+        true
+      );
+    }
+
+    // Right-hand half-landing joins the two parallel flights.
+    box(
+      stairs,
+      landingX,
+      lowerD,
+      midHeight - 0.14,
+      landingWidth,
+      upperD + flightWidth - lowerD,
+      0.14,
+      treadMat,
+      true
+    );
+
+    // Returning upper flight. Its highest tread ends at LEFT.
+    for (let i = 0; i < STEPS_PER_FLIGHT; i++) {
+      const treadTop = midHeight + (i + 1) * rise;
+
+      box(
+        stairs,
+        landingX - (i + 1) * run,
+        upperD,
+        midHeight - 0.14,
+        run,
+        flightWidth,
+        treadTop - midHeight + 0.14,
+        treadMat,
+        true
+      );
+    }
+
+    // ------------------------------------------------------------
+    // Guardrails and handrails
+    // ------------------------------------------------------------
+
+    function rod(group, a, b, radius = 0.022, mat = frameMat) {
+      const p1 = new THREE.Vector3(a[0], a[2], -a[1]);
+      const p2 = new THREE.Vector3(b[0], b[2], -b[1]);
+      const delta = p2.clone().sub(p1);
+
+      const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          radius, radius, delta.length(), 10
+        ),
+        mat
+      );
+
+      mesh.position.copy(p1).add(p2).multiplyScalar(0.5);
+      mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        delta.normalize()
+      );
+
+      group.add(mesh);
+    }
+
+    function rail(group, a, b, base = 0, height = 1.0) {
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const divisions = Math.max(1, Math.ceil(length / 0.4));
+
+      for (let i = 0; i <= divisions; i++) {
+        const t = i / divisions;
+        const x = THREE.MathUtils.lerp(a[0], b[0], t);
+        const d = THREE.MathUtils.lerp(a[1], b[1], t);
+
+        rod(group, [x, d, base], [x, d, base + height]);
+      }
+
+      rod(
+        group,
+        [a[0], a[1], base + height],
+        [b[0], b[1], base + height],
+        0.03
+      );
+    }
+
+    // Upstairs opening edge on LEFT:
+    // guard only the part that is NOT the upper-flight exit.
+    rail(
+      upper,
+      [STAIR.left, STAIR.front],
+      [STAIR.left, upperD - 0.03]
+    );
+
+    // Ground-level handrails rising with each flight.
+    function slopingRail(d, x1, h1, x2, h2) {
+      rod(
+        stairs,
+        [x1, d, h1 + 0.95],
+        [x2, d, h2 + 0.95],
+        0.03
+      );
+
+      for (let i = 0; i <= 4; i++) {
+        const t = i / 4;
+        const x = THREE.MathUtils.lerp(x1, x2, t);
+        const h = THREE.MathUtils.lerp(h1, h2, t);
+
+        rod(stairs, [x, d, h], [x, d, h + 0.95]);
+      }
+    }
+
+    slopingRail(
+      lowerD + flightWidth,
+      STAIR.left, rise,
+      landingX, midHeight
+    );
+
+    slopingRail(
+      upperD,
+      landingX, midHeight,
+      STAIR.left, STOREY
+    );
+
+    // ------------------------------------------------------------
+    // Furniture: simplified, secondary to the plan geometry
+    // ------------------------------------------------------------
+
+    function bed(group, x, d, width, depth) {
+      box(group, x, d, 0.05, width, depth, 0.28, timberMat);
+      box(group, x, d, 0.33, width, depth, 0.19, whiteMat);
+      box(
+        group, x + 0.03, d + 0.05, 0.52,
+        width - 0.06, depth * 0.70, 0.04, blueMat
+      );
+      box(
+        group, x + 0.12, d + depth - 0.47, 0.53,
+        width - 0.24, 0.35, 0.12, whiteMat
+      );
+    }
+
+    function cabinet(group, x, d, width, depth, height = 0.9) {
+      box(group, x, d, 0, width, depth, height, whiteMat, true);
+      box(
+        group, x - 0.02, d - 0.02, height,
+        width + 0.04, depth + 0.04, 0.04,
+        countertopMat
+      );
+    }
+
+    function chair(group, x, d, rotation = 0) {
+      const c = new THREE.Group();
+      c.position.set(x, 0, -d);
+      c.rotation.y = rotation;
+      group.add(c);
+
+      box(c, -0.23, -0.23, 0.40, 0.46, 0.46, 0.08, timberMat);
+      box(c, -0.23, 0.18, 0.48, 0.46, 0.06, 0.43, timberMat);
+
+      for (const lx of [-0.19, 0.15]) {
+        for (const ld of [-0.19, 0.15]) {
+          box(c, lx, ld, 0, 0.04, 0.04, 0.40, darkMat);
+        }
+      }
+    }
+
+    function toilet(group, x, d) {
+      box(group, x, d, 0, 0.44, 0.62, 0.40, fixtureMat, true);
+      box(group, x, d + 0.46, 0.40, 0.44, 0.16, 0.35, fixtureMat);
+    }
+
+    function basin(group, x, d, width = 0.55) {
+      cabinet(group, x, d, width, 0.44, 0.77);
+      box(
+        group, x + 0.07, d + 0.06, 0.82,
+        width - 0.14, 0.30, 0.05, waterMat
+      );
+    }
+
+    // Ground-floor kitchen along left/back of open-plan area.
+    cabinet(ground, 0.18, 4.60, 0.62, 1.72);
+    cabinet(ground, 0.80, 5.70, 1.80, 0.62);
+    cabinet(ground, 0.80, 4.10, 1.80, 0.70);
+
+    // Hob on peninsula.
+    box(ground, 1.05, 4.22, 0.945, 0.52, 0.44, 0.018, darkMat);
+
+    // Dining table, six chairs.
+    box(ground, 1.00, 1.15, 0.70, 1.05, 1.80, 0.08, timberMat);
+
+    for (const d of [1.42, 2.03, 2.66]) {
+      chair(ground, 0.65, d, Math.PI / 2);
+      chair(ground, 2.40, d, -Math.PI / 2);
+    }
+
+    // Living room furniture.
+    box(ground, 3.15, 0.72, 0.12, 1.85, 0.82, 0.42, upholsteryMat);
+    box(ground, 3.15, 0.72, 0.54, 1.85, 0.17, 0.38, upholsteryMat);
+    box(ground, 3.53, 2.02, 0.34, 1.15, 0.68, 0.07, timberMat);
+    box(ground, 3.15, 3.10, 0.08, 0.70, 0.78, 0.48, upholsteryMat);
+    box(ground, 4.15, 3.10, 0.08, 0.70, 0.78, 0.48, upholsteryMat);
+    box(ground, 5.63, 1.00, 0, 0.22, 2.50, 0.45, whiteMat);
+    box(ground, 5.76, 1.60, 0.65, 0.04, 1.15, 0.72, darkMat);
+
+    // Ground bathroom and rear room.
+    box(ground, 0.25, 8.70, 0, 0.85, 1.22, 0.05, whiteMat, true);
+    basin(ground, 2.25, 9.48);
+    toilet(ground, 1.35, 9.05);
+    cabinet(ground, 4.25, 9.25, 1.10, 0.65, 1.6);
+
+    // First-floor bedrooms.
+    bed(upper, 0.28, 0.55, 0.90, 1.95);
+    bed(upper, 4.70, 0.55, 0.90, 1.95);
+    // Low cabinets: their tops align with the main bed surface.
+    // Cabinet body plus countertop totals 0.56 metres.
+    cabinet(upper, 1.15, 0.25, 1.30, 0.55, 0.52);
+    cabinet(upper, 3.30, 0.25, 1.25, 0.55, 0.52);
+
+    bed(upper, 3.80, 7.05, 1.65, 2.00);
+    cabinet(upper, 2.18, 8.85, 0.60, 1.10, 1.85);
+
+    // Upstairs bathroom 2.02.
+    box(upper, 0.23, 4.65, 0, 1.48, 0.76, 0.52, fixtureMat, true);
+    box(upper, 0.33, 4.76, 0.53, 1.27, 0.54, 0.015, waterMat);
+    basin(upper, 0.23, 5.85, 0.65);
+    basin(upper, 0.23, 6.40, 0.65);
+    toilet(upper, 1.18, 7.00);
+
+    // Upstairs room 2.03.
+    basin(upper, 1.08, 8.04, 0.62);
+    toilet(upper, 1.16, 9.10);
+    box(upper, 0.25, 8.12, 0, 0.72, 1.65, 0.05, whiteMat, true);
+
+    // ------------------------------------------------------------
+    // Front terrace
+    // ------------------------------------------------------------
+
+    const deckD = 2.90;
+
+    box(
+      terrace, -0.20, -deckD, -0.15,
+      5.55, deckD, 0.12, timberMat, true
+    );
+
+    for (let d = -deckD + 0.12; d < 0; d += 0.18) {
+      box(
+        terrace, -0.20, d, -0.025,
+        5.55, 0.008, 0.005, darkMat
+      );
+    }
+
+    box(terrace, 2.00, -2.08, 0.43, 0.75, 1.10, 0.06, timberMat);
+    chair(terrace, 1.42, -1.70, Math.PI / 2);
+    chair(terrace, 1.42, -2.35, Math.PI / 2);
+
+    box(
+      terrace, 3.15, -2.35, 0.10,
+      0.70, 1.45, 0.40, upholsteryMat
+    );
+
+    // ------------------------------------------------------------
+    // Chimney column
+    // ------------------------------------------------------------
+    // Upper-right corner of ground-floor room 1.05 in plan view.
+    // Positioned just in front of the staircase, against the right wall.
+    //
+    // Position and cross-section are approximate.
+    // Both storeys share the same footprint.
+    // ------------------------------------------------------------
+
+    const chimneyMat = material("#b8afa2");
+
+    const CHIMNEY = {
+      x: 5.36,
+      d: 3.82,
+      width: 0.44,
+      depth: 0.46,
+      aboveRoof: 0.55
+    };
+
+    // Ground-floor section reaches the underside of the upper slab.
+    box(
+      ground,
+      CHIMNEY.x,
+      CHIMNEY.d,
+      0,
+      CHIMNEY.width,
+      CHIMNEY.depth,
+      STOREY - SLAB_T,
+      chimneyMat,
+      true
+    );
+
+    // Independent group so the chimney remains visible
+    // when the first floor is hidden.
+    const upperChimney = new THREE.Group();
+    upperChimney.position.y = STOREY;
+    scene.add(upperChimney);
+
+    // Upper section passes through the first-floor slab and continues
+    // above the nominal roof line. Attached to `upper` so it follows
+    // that storey when the exploded-view slider is used.
+    box(
+      upperChimney,
+      CHIMNEY.x,
+      CHIMNEY.d,
+      -SLAB_T,
+      CHIMNEY.width,
+      CHIMNEY.depth,
+      SLAB_T + WALL_H + CHIMNEY.aboveRoof,
+      chimneyMat,
+      true
+    );
+
+    // Simple chimney cap.
+    box(
+      upperChimney,
+      CHIMNEY.x - 0.04,
+      CHIMNEY.d - 0.04,
+      WALL_H + CHIMNEY.aboveRoof,
+      CHIMNEY.width + 0.08,
+      CHIMNEY.depth + 0.08,
+      0.07,
+      darkMat,
+      true
+    );
+
+    // ------------------------------------------------------------
+    // Camera and controls
+    // ------------------------------------------------------------
+
+    function resize() {
+      const aspect = window.innerWidth / window.innerHeight;
+      const viewHeight = 17;
+
+      camera.left = -viewHeight * aspect / 2;
+      camera.right = viewHeight * aspect / 2;
+      camera.top = viewHeight / 2;
+      camera.bottom = -viewHeight / 2;
+      camera.near = 0.1;
+      camera.far = 150;
+      camera.updateProjectionMatrix();
+
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function resetView() {
+      // Front-left viewpoint, matching the arrow on the plans.
+      camera.position.set(-12, 15, 13);
+      controls.target.set(W / 2, 2.0, -D / 2 + 0.6);
+      camera.zoom = 1;
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+
+    window.addEventListener("resize", resize);
+    document.getElementById("resetView").onclick = resetView;
+
+    document.getElementById("showFirstFloor").onchange = (event) => {
+      upper.visible = event.target.checked;
+    };
+
+    document.getElementById("wallOpacity").oninput = (event) => {
+      const opacity = Number(event.target.value);
+
+      exteriorMat.opacity = opacity;
+      exteriorMat.transparent = opacity < 1;
+      exteriorMat.depthWrite = opacity >= 1;
+      exteriorMat.needsUpdate = true;
+
+      document.getElementById("wallValue").textContent =
+        `${Math.round(opacity * 100)}%`;
+    };
+
+    document.getElementById("floorOpacity").oninput = (event) => {
+      const opacity = Number(event.target.value);
+
+      upperFloorMat.opacity = opacity;
+      upperFloorMat.transparent = opacity < 1;
+      upperFloorMat.depthWrite = opacity >= 1;
+      upperFloorMat.needsUpdate = true;
+
+      document.getElementById("floorValue").textContent =
+        `${Math.round(opacity * 100)}%`;
+    };
+
+    // document.getElementById("explode").oninput = (event) => {
+    //   // This is a diagrammatic separation: the stairs remain
+    //   // in their physical position attached to the ground floor.
+    //   upper.position.y = STOREY + Number(event.target.value);
+    // };
+
+    document.getElementById("explode").oninput = (event) => {
+      const elevation = STOREY + Number(event.target.value);
+
+      upper.position.y = elevation;
+      upperChimney.position.y = elevation;
+    };
+
+    resize();
+    resetView();
+
+    renderer.setAnimationLoop(() => {
+      controls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>
